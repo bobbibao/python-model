@@ -1,19 +1,26 @@
 """
-FastAPI Application for Stable Diffusion Image Generation and Editing
-Production-ready with optimized model loading and resource management
+FastAPI Application for SDXL Image Generation with ControlNet and LoRA
+
+Production-ready backend with:
+- SDXL base model
+- ControlNet support (canny, lineart)
+- LoRA fine-tuning (dynamic loading)
+- Unified v2 API (/api/v2/generate)
+- Memory optimizations for Colab Pro
 """
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .generation import build_output_url, ensure_output_dir, process_edit, process_generate
-from .models import EditRequest, GenerateRequest, GenerateResponse
-from .pipeline import get_pipeline_status
+from .api.v2 import router as v2_router
+from .pipelines.pipeline_registry import get_registry
+from .utils.memory_utils import get_gpu_memory_info, log_memory_stats
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -22,41 +29,94 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-ensure_output_dir()
+# Ensure output directory exists
+output_dir = Path(settings.output_dir)
+output_dir.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    FastAPI lifespan context manager for startup/shutdown events
-    - Preload models on startup if configured
-    - Graceful shutdown
+    FastAPI lifespan context manager for startup/shutdown events.
+    
+    Startup:
+    - Initialize pipeline registry
+    - Log device and configuration
+    - Preload pipelines (optional)
+    
+    Shutdown:
+    - Clean up all pipelines
+    - Clear CUDA cache
+    - Log shutdown message
     """
-    # Startup
+    # ============================================
+    # STARTUP
+    # ============================================
     logger.info("=" * 70)
-    logger.info("🚀 Starting Vizera Python Model Service...")
+    logger.info("🚀 Starting Vizera Python Model Service (SDXL + ControlNet + LoRA)")
     logger.info("=" * 70)
     
-    
-    logger.info("=" * 70)
-    logger.info("✓ Service started successfully!")
-    logger.info("=" * 70)
+    try:
+        # Initialize pipeline registry (singleton)
+        registry = get_registry()
+        logger.info("✓ Pipeline registry initialized")
+        
+        # Log device and memory info
+        log_memory_stats("startup")
+        
+        # Get registry status
+        status = registry.get_status()
+        logger.info(f"Device: {status['device']} | Dtype: {status['dtype']}")
+        
+        # Log configuration
+        logger.info(f"SDXL Model: {settings.sdxl_base_model_id}")
+        logger.info(f"ControlNet Canny: {settings.controlnet_canny_model_id}")
+        logger.info(f"ControlNet Lineart: {settings.controlnet_lineart_model_id}")
+        logger.info(f"Default LoRA: {settings.default_lora_path}")
+        logger.info(f"Cache Dir: {settings.cache_dir}")
+        logger.info(f"Output Dir: {settings.output_dir}")
+        
+        logger.info("=" * 70)
+        logger.info("✓ Service started successfully!")
+        logger.info("=" * 70)
+        
+    except Exception as e:
+        logger.error(f"✗ Startup failed: {e}", exc_info=True)
+        raise
     
     yield
     
-    # Shutdown
+    # ============================================
+    # SHUTDOWN
+    # ============================================
     logger.info("=" * 70)
     logger.info("🛑 Shutting down Vizera Python Model Service...")
     logger.info("=" * 70)
-
+    
+    try:
+        # Clean up all pipelines
+        registry = get_registry()
+        registry.cleanup_all()
+        logger.info("✓ Pipelines cleaned up")
+        
+        # Log final memory state
+        log_memory_stats("shutdown")
+        
+        logger.info("=" * 70)
+        logger.info("✓ Shutdown completed successfully")
+        logger.info("=" * 70)
+        
+    except Exception as e:
+        logger.error(f"⚠ Error during shutdown: {e}", exc_info=True)
 
 app = FastAPI(
     title=settings.service_name,
-    version="0.3.0",
-    description="Production-grade Stable Diffusion API with optimized model loading",
+    version="2.0.0",
+    description="Production-grade SDXL image generation with ControlNet and LoRA support",
     lifespan=lifespan,
 )
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,94 +125,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount outputs directory for image serving
 app.mount("/outputs", StaticFiles(directory=settings.output_dir), name="outputs")
 
+# Include v2 routes
+app.include_router(v2_router)
 
-@app.get("/health")
-def health():
-    """Health check endpoint"""
+
+# ============================================
+# HEALTH CHECK ENDPOINT
+# ============================================
+
+
+@app.get("/health", tags=["health"])
+def health_check():
+    """
+    Health check endpoint for load balancers and monitoring.
+    
+    Returns basic service status.
+    """
     return {
         "status": "ok",
         "service": settings.service_name,
-        "version": "0.3.0",
+        "version": "2.0.0",
     }
 
 
-@app.get("/debug/pipeline-status")
-def pipeline_status():
-    """Debug endpoint to check pipeline status and configuration"""
-    return get_pipeline_status()
-
-
-@app.post("/api/v1/generate", response_model=GenerateResponse)
-def generate_image(payload: GenerateRequest):
+@app.get("/debug/memory", tags=["debug"])
+def debug_memory():
     """
-    Generate images using Stable Diffusion
+    Debug endpoint to check GPU memory usage.
     
-    Supports multiple input types:
-    - text-to-image: Generate from prompt
-    - image-to-image: Modify existing image
-    - image-upscaling: Upscale image resolution
-    - line-drawing-to-image: Convert line drawing to detailed image
+    ⚠️ Warning: For debugging only, not for production use.
     """
-    try:
-        job_id, out_width, out_height = process_generate(
-            prompt=payload.prompt,
-            width=payload.width,
-            height=payload.height,
-            seed=payload.seed,
-            input_type=payload.input_type,
-            image=payload.image,
-            strength=payload.strength,
-            upscale_factor=payload.upscale_factor,
-        )
-        return GenerateResponse(
-            job_id=job_id,
-            status="completed",
-            image_url=build_output_url(job_id),
-            width=out_width,
-            height=out_height,
-        )
-    except Exception as e:
-        logger.error(f"Generation request failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Image generation failed: {str(e)}"
-        )
+    return get_gpu_memory_info()
 
-
-@app.post("/api/v1/edit", response_model=GenerateResponse)
-def edit_image(payload: EditRequest):
-    """
-    Edit images using various methods:
-    - EDIT_OBJECT_REMOVAL: Remove objects from images
-    - EDIT_UPSCALING: Upscale image resolution
-    - EDIT_FLUX_FILL_INPAINT: Fill masked areas with AI
-    - EDIT_FLUX_FILL_EXTEND: Extend canvas with AI generation
-    """
-    try:
-        job_id, out_width, out_height = process_edit(
-            method=payload.method,
-            image=payload.image,
-            prompt=payload.prompt,
-            style_prompt=payload.style_prompt,
-            mask=payload.mask,
-            crop=payload.crop,
-            direction=payload.direction,
-            pixels=payload.pixels,
-            upscale_factor=payload.upscale_factor,
-            seed=payload.seed,
-        )
-        return GenerateResponse(
-            job_id=job_id,
-            status="completed",
-            image_url=build_output_url(job_id),
-            width=out_width,
-            height=out_height,
-        )
-    except Exception as e:
-        logger.error(f"Edit request failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Image editing failed: {str(e)}"
-        )
