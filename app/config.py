@@ -58,7 +58,7 @@ class Settings(BaseModel):
     # =====================================================================
     controlnet_canny_model_id: str = os.getenv(
         "CONTROLNET_CANNY_MODEL_ID",
-        "lllyasviel/sd-xl-controlnet-canny"
+        "diffusers/controlnet-canny-sdxl-1.0"
     )
     """ControlNet model for canny edge detection."""
     
