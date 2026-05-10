@@ -47,7 +47,7 @@ Thumbs.db
 # .env
 .env
 \.venv
-\app\__pycache__
+**/__pycache__/
 
 # docker
 docker-compose.yml.local

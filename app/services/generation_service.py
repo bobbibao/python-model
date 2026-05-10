@@ -133,7 +133,7 @@ class GenerationService:
                 result_image = self._generate_text_to_image(
                     prompt, negative_prompt, inference_config, lora_config
                 )
-                metadata["lora_applied"] = lora_config and lora_config.enabled
+                metadata["lora_applied"] = bool(lora_config and lora_config.enabled)
                 
             elif mode == GenerationMode.IMAGE_TO_IMAGE:
                 if image is None:
@@ -141,7 +141,7 @@ class GenerationService:
                 result_image = self._generate_image_to_image(
                     prompt, negative_prompt, image, strength, inference_config, lora_config
                 )
-                metadata["lora_applied"] = lora_config and lora_config.enabled
+                metadata["lora_applied"] = bool(lora_config and lora_config.enabled)
                 
             elif mode == GenerationMode.SKETCH_TO_IMAGE:
                 if image is None:
@@ -152,7 +152,7 @@ class GenerationService:
                     prompt, negative_prompt, image, controlnet_config, inference_config, lora_config
                 )
                 metadata["controlnet_used"] = controlnet_config.type
-                metadata["lora_applied"] = lora_config and lora_config.enabled
+                metadata["lora_applied"] = bool(lora_config and lora_config.enabled)
                 
             elif mode == GenerationMode.INPAINT:
                 if image is None:
@@ -161,7 +161,7 @@ class GenerationService:
                 result_image = self._generate_text_to_image(
                     prompt, negative_prompt, inference_config, lora_config
                 )
-                metadata["lora_applied"] = lora_config and lora_config.enabled
+                metadata["lora_applied"] = bool(lora_config and lora_config.enabled)
                 
             else:
                 raise ValueError(f"Unsupported generation mode: {mode}")

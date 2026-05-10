@@ -179,7 +179,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 mode=metadata["mode"],
                 inference_time_ms=metadata["inference_time_ms"],
                 device=metadata["device"],
-                lora_applied=metadata["lora_applied"],
+                lora_applied=bool(metadata["lora_applied"]),
                 controlnet_used=metadata["controlnet_used"],
             ),
         )
