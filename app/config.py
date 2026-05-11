@@ -24,7 +24,7 @@ class Settings(BaseModel):
     # =====================================================================
     service_name: str = os.getenv("SERVICE_NAME", "vizera-python-model")
     output_dir: str = os.getenv("OUTPUT_DIR", "outputs")
-    base_url: str = os.getenv("BASE_URL", "http://localhost:8001")
+    base_url: str = os.getenv("BASE_URL", "https://genimageapi.dpdns.org")
     
     # =====================================================================
     # LEGACY MODEL CONFIGURATION (SD v1.5) - for backward compatibility
