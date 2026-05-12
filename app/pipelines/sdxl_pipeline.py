@@ -2,9 +2,16 @@
 SDXL Base Pipeline: Text-to-image generation using SDXL.
 
 Uses StableDiffusionXLPipeline for core functionality with memory optimizations.
+
+Memory management features:
+- torch.inference_mode() for gradient-free inference
+- Post-inference cleanup (gc.collect, cuda.empty_cache, ipc_collect)
+- Proper output tensor cleanup to prevent fragmentation
+- Generator cleanup
 """
 
 import logging
+import gc
 import torch
 from typing import Optional
 from diffusers import (
@@ -67,8 +74,10 @@ class SDXLBasePipeline(BasePipeline):
             self.apply_memory_optimizations(self.pipeline)
             self.apply_cpu_offload(self.pipeline)
             
-            # Disable safety checker for faster inference
+            # Disable safety checker (consumes memory, not needed for inference)
+            # Use set_progress_bar_config if needed for monitoring
             self.pipeline.safety_checker = None
+            logger.debug("[sdxl_base] Safety checker disabled (not needed for inference)")
             
             self._initialized = True
             logger.info("[sdxl_base] ✓ SDXL base pipeline initialized successfully")
@@ -117,9 +126,15 @@ class SDXLBasePipeline(BasePipeline):
             f"size={width}x{height}, steps={num_inference_steps}, scale={guidance_scale}"
         )
         
-        generator = self.get_generator(seed)
+        generator = None
+        output = None
+        result_image = None
         
         try:
+            # Create generator for reproducibility
+            generator = self.get_generator(seed)
+            
+            # CRITICAL: Use inference_mode() which handles ALL cleanup
             with self.inference_mode():
                 output = self.pipeline(
                     prompt=prompt,
@@ -130,31 +145,61 @@ class SDXLBasePipeline(BasePipeline):
                     guidance_scale=guidance_scale,
                     generator=generator,
                 )
+                
+                # Extract image from output IMMEDIATELY
+                result_image = output.images[0]
+                logger.debug("[sdxl_base] ✓ Image extracted from output")
             
-            logger.debug("[sdxl_base] ✓ Generation completed")
-            return output.images[0]
+            # Explicitly delete intermediate objects
+            del output
+            del generator
+            logger.debug("[sdxl_base] Output and generator deleted")
+            
+            # Clear any remaining references
+            self.clear_tensor_references()
+            
+            return result_image
             
         except Exception as e:
             logger.error(f"[sdxl_base] Generation failed: {e}", exc_info=True)
+            # Ensure cleanup even on error
+            try:
+                del output
+                del generator
+            except:
+                pass
+            self.clear_tensor_references()
             raise
     
     def cleanup(self):
         """
-        Clean up pipeline resources.
+        Clean up pipeline resources and free VRAM.
         
-        Moves pipeline to CPU and clears CUDA cache.
+        Called during application shutdown or manual cleanup.
+        Moves models to CPU first, then clears all caches.
         """
+        logger.info("[sdxl_base] Starting cleanup...")
+        
         if self.pipeline is not None:
             try:
+                # Move to CPU first (frees GPU VRAM)
                 self.pipeline = self.pipeline.to("cpu")
                 logger.debug("[sdxl_base] Pipeline moved to CPU")
             except Exception as e:
-                logger.warning(f"[sdxl_base] Error during cleanup: {e}")
+                logger.warning(f"[sdxl_base] Error during cleanup (move to CPU): {e}")
         
         # Clear CUDA cache if available
         if self.device == "cuda":
-            torch.cuda.empty_cache()
-            logger.debug("[sdxl_base] CUDA cache cleared")
+            try:
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                logger.debug("[sdxl_base] CUDA cache cleared and IPC collected")
+            except Exception as e:
+                logger.warning(f"[sdxl_base] Error during CUDA cleanup: {e}")
+        
+        # Force garbage collection
+        gc.collect()
+        logger.info("[sdxl_base] ✓ Cleanup completed")
     
     def __del__(self):
         """Cleanup on deletion."""

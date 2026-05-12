@@ -2,9 +2,11 @@
 FastAPI v2 routes: unified /api/v2/generate endpoint.
 
 Single entry point for all generation modes with clean separation of concerns.
+Memory-conscious implementation with proper cleanup of intermediate objects.
 """
 
 import logging
+import gc
 import uuid
 import traceback
 from fastapi import APIRouter, HTTPException, status
@@ -73,6 +75,8 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
     ```
     """
     job_id = str(uuid.uuid4())
+    input_image = None
+    result_image = None
     
     try:
         # Log memory at start
@@ -87,7 +91,6 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         # ============================================
         
         # Decode input image if provided
-        input_image = None
         if request.image is not None:
             logger.debug(f"[{job_id}] Decoding input image...")
             input_image = decode_base64_image(request.image)
@@ -153,6 +156,17 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         logger.info(f"[{job_id}] ✓ Generation completed in {metadata['inference_time_ms']}ms")
         
         # ============================================
+        # CLEANUP INPUT IMAGE (no longer needed)
+        # ============================================
+        try:
+            if input_image is not None:
+                del input_image
+                gc.collect()
+                logger.debug(f"[{job_id}] Input image cleaned up")
+        except Exception as e:
+            logger.warning(f"[{job_id}] Error cleaning up input image: {e}")
+        
+        # ============================================
         # OUTPUT PREPARATION
         # ============================================
         
@@ -213,6 +227,16 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Image generation failed: {str(e)}",
         )
+    
+    finally:
+        # CRITICAL: Final cleanup in exception cases
+        try:
+            if input_image is not None:
+                del input_image
+        except:
+            pass
+        gc.collect()
+        logger.debug(f"[{job_id}] Final cleanup executed")
 
 
 @router.get(

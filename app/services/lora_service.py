@@ -4,11 +4,13 @@ LoRA Service: Manages LoRA adapter loading, unloading, and caching.
 Handles:
 - Loading LoRA adapters from disk
 - Fusing/unfusing adapters
-- LRU-based memory management
-- Per-request adapter switching
+- LRU-based memory management with explicit cleanup
+- Per-request adapter switching with memory safety
+- Proper tensor cleanup to prevent VRAM leaks
 """
 
 import logging
+import gc
 from pathlib import Path
 from typing import Optional, Dict
 from collections import OrderedDict
@@ -131,6 +133,8 @@ class LoRAService:
         """
         Unload and unfuse LoRA adapter from pipeline.
         
+        Properly removes LoRA from the pipeline and clears any cached references.
+        
         Args:
             pipeline: The pipeline to unload LoRA from
         
@@ -144,24 +148,28 @@ class LoRAService:
             
             logger.info(f"[lora] Unloading LoRA: {self._current_lora}...")
             
-            # Unfuse if available
-            if hasattr(pipeline, "unfuse_lora"):
-                try:
-                    pipeline.unfuse_lora()
-                    logger.debug("[lora] LoRA unfused")
-                except Exception as e:
-                    logger.warning(f"[lora] Could not unfuse LoRA: {e}")
-            
-            # Disable if available (peft)
+            # 1. Disable LoRA if available (peft - best method)
             if hasattr(pipeline, "disable_lora"):
                 try:
                     pipeline.disable_lora()
-                    logger.debug("[lora] LoRA disabled")
+                    logger.debug("[lora] LoRA disabled via disable_lora()")
                 except Exception as e:
                     logger.warning(f"[lora] Could not disable LoRA: {e}")
             
+            # 2. Unfuse if available (alternative method)
+            if hasattr(pipeline, "unfuse_lora"):
+                try:
+                    pipeline.unfuse_lora()
+                    logger.debug("[lora] LoRA unfused via unfuse_lora()")
+                except Exception as e:
+                    logger.warning(f"[lora] Could not unfuse LoRA: {e}")
+            
+            # 3. Force garbage collection to free LoRA tensors
+            gc.collect()
+            logger.debug("[lora] Garbage collected after unload")
+            
             self._current_lora = None
-            logger.info("[lora] ✓ LoRA unloaded")
+            logger.info("[lora] ✓ LoRA unloaded and cleaned up")
             return True
             
         except Exception as e:

@@ -7,9 +7,12 @@ Production-ready backend with:
 - LoRA fine-tuning (dynamic loading)
 - Unified v2 API (/api/v2/generate)
 - Memory optimizations for Colab Pro
+- CUDA memory management and defragmentation
 """
 
 import logging
+import gc
+import torch
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -98,6 +101,16 @@ async def lifespan(app: FastAPI):
         registry = get_registry()
         registry.cleanup_all()
         logger.info("✓ Pipelines cleaned up")
+        
+        # Force garbage collection
+        gc.collect()
+        logger.info("✓ Python garbage collected")
+        
+        # Clear CUDA memory and caches
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            logger.info("✓ CUDA cache cleared and IPC collected")
         
         # Log final memory state
         log_memory_stats("shutdown")

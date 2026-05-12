@@ -64,7 +64,7 @@ class Settings(BaseModel):
     
     controlnet_lineart_model_id: str = os.getenv(
         "CONTROLNET_LINEART_MODEL_ID",
-        "lllyasviel/sd-xl-controlnet-lineart"
+        "zbulrush/controlnet-sd-xl-1.0-lineart"
     )
     """ControlNet model for line art / sketch-to-image."""
     
@@ -115,9 +115,9 @@ class Settings(BaseModel):
     """Enable VAE slicing to reduce VRAM peak usage during VAE decode."""
     
     enable_vae_tiling: bool = os.getenv(
-        "ENABLE_VAE_TILING", "false"
+        "ENABLE_VAE_TILING", "true"
     ).lower() in ("true", "1", "yes")
-    """Enable VAE tiling (more memory efficient but slower decoding)."""
+    """Enable VAE tiling (trades latency for VRAM, critical for Colab T4)."""
     
     enable_model_cpu_offload: bool = os.getenv(
         "ENABLE_MODEL_CPU_OFFLOAD", "true"

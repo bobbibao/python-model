@@ -1,10 +1,12 @@
 """
 Memory utilities: VRAM profiling and diagnostics.
 
-Helpers for monitoring GPU memory usage and detecting leaks.
+Helpers for monitoring GPU memory usage, detecting leaks, and performing
+comprehensive memory cleanup to prevent VRAM fragmentation and OOM errors.
 """
 
 import logging
+import gc
 import torch
 
 logger = logging.getLogger(__name__)
@@ -97,17 +99,72 @@ def log_memory_stats(stage: str = ""):
 
 def reset_memory():
     """
-    Reset/clear memory caches.
+    Reset/clear memory caches comprehensively.
     
-    Calls torch.cuda.empty_cache() if CUDA is available.
+    Performs full CUDA memory cleanup:
+    - Python garbage collection
+    - CUDA cache clearing
+    - CUDA IPC collection (defragmentation)
+    
+    Critical for preventing VRAM fragmentation during long-running inference.
     """
     from ..core import check_cuda_available
     
+    # 1. Force Python garbage collection
+    gc.collect()
+    logger.debug("Python garbage collected")
+    
+    # 2. CUDA cleanup
     if check_cuda_available():
-        torch.cuda.empty_cache()
-        logger.debug("GPU memory cache cleared")
+        try:
+            torch.cuda.empty_cache()
+            logger.debug("CUDA cache cleared")
+        except Exception as e:
+            logger.warning(f"Error clearing CUDA cache: {e}")
+        
+        try:
+            torch.cuda.ipc_collect()
+            logger.debug("CUDA IPC collected (defragmentation)")
+        except Exception as e:
+            # ipc_collect might not be available in all torch versions
+            logger.debug(f"CUDA IPC collect not available: {e}")
     else:
         logger.debug("CUDA not available, skipping cache clear")
+
+
+def comprehensive_cleanup():
+    """
+    Perform comprehensive memory cleanup.
+    
+    More aggressive than reset_memory - use when experiencing memory pressure.
+    """
+    logger.info("Performing comprehensive memory cleanup...")
+    
+    # 1. Python garbage collection (multiple passes)
+    gc.collect()
+    gc.collect()
+    logger.debug("Python garbage collected (2 passes)")
+    
+    # 2. CUDA cleanup
+    from ..core import check_cuda_available
+    
+    if check_cuda_available():
+        try:
+            # Clear cache multiple times
+            torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
+            logger.debug("CUDA cache cleared (2 passes)")
+        except Exception as e:
+            logger.warning(f"Error clearing CUDA cache: {e}")
+        
+        try:
+            torch.cuda.ipc_collect()
+            torch.cuda.ipc_collect()
+            logger.debug("CUDA IPC collected (2 passes, defragmentation)")
+        except Exception as e:
+            logger.debug(f"CUDA IPC collect not fully available: {e}")
+    
+    logger.info("Comprehensive cleanup completed")
 
 
 def estimate_model_memory(model_params: int, dtype_bytes: int = 2) -> float:

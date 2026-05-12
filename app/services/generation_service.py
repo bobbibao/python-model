@@ -6,10 +6,13 @@ Coordinates:
 - LoRA loading/unloading
 - ControlNet preprocessing
 - Request validation and response building
+- Memory cleanup after generation
 """
 
 import logging
+import gc
 import time
+import torch
 from typing import Optional, Tuple
 from PIL import Image
 
@@ -259,6 +262,8 @@ class GenerationService:
         # Get ControlNet pipeline
         pipeline = self.registry.get_pipeline(GenerationMode.SKETCH_TO_IMAGE)
         
+        result_image = None
+        
         # Load LoRA if needed
         if lora_config and lora_config.enabled:
             self.lora_service.load_lora(
@@ -268,7 +273,7 @@ class GenerationService:
             )
         
         try:
-            image = pipeline.generate(
+            result_image = pipeline.generate(
                 prompt=prompt,
                 control_image=processed_image,
                 controlnet_type=controlnet_type,
@@ -280,11 +285,23 @@ class GenerationService:
                 controlnet_scale=controlnet_config.scale,
                 seed=inference_config.seed,
             )
-            return image
+            return result_image
         finally:
-            # Unload LoRA after generation
+            # CRITICAL: Cleanup in proper order
+            
+            # 1. Unload LoRA after generation
             if lora_config and lora_config.enabled:
                 self.lora_service.unload_lora(pipeline.pipeline)
+            
+            # 2. Delete processed image (can be large)
+            try:
+                del processed_image
+            except:
+                pass
+            
+            # 3. Force garbage collection
+            gc.collect()
+            logger.debug("[generation] Sketch-to-image cleanup completed")
     
     def get_status(self) -> dict:
         """Get status of the generation service and all pipelines."""
