@@ -5,7 +5,6 @@
 
 Sets up optimal CUDA memory allocation strategies for inference on Colab T4/L4 GPUs:
 - expandable_segments: Allows CUDA to reuse fragmented memory
-- roundSmallAllocationsUp: Reduces fragmentation
 - max_split_size_mb: Prevents OOM from fragmentation
 
 This prevents CUDA OOM and VRAM fragmentation issues during long-running inference.
@@ -22,13 +21,11 @@ logger = logging.getLogger(__name__)
 # ============================================
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = (
     "expandable_segments:True,"
-    "roundSmallAllocationsUp:True,"
-    "max_split_size_mb:512"
+    "max_split_size_mb:128"
 )
 
 logger.info(
     "🔧 PYTORCH_CUDA_ALLOC_CONF configured:\n"
-    "   - expandable_segments: True (reuse fragmented VRAM)\n"
-    "   - roundSmallAllocationsUp: True (reduce fragmentation)\n"
-    "   - max_split_size_mb: 512 (split large allocations)"
+    "   - expandable_segments: True\n"
+    "   - max_split_size_mb: 128"
 )
